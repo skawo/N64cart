@@ -31,24 +31,31 @@ static int valign(const char *s)
     return (scr_width >> 1) - strlen(s) * 4 * scr_scale;
 }
 
-sprite_t *image_load(char *name, int screen_w, int screen_h)
+sprite_t *image_load(char *name, int screen_w, int screen_h, uint8_t *picture_data, int picture_data_length)
 {
     sprite_t *image = NULL;
     uint8_t romfs_flash_buffer[ROMFS_FLASH_SECTOR];
     romfs_file file;
 
-    if (romfs_open_file(name, &file, romfs_flash_buffer) == ROMFS_NOERR) {
+    if (picture_data != NULL || (name != NULL && romfs_open_file(name, &file, romfs_flash_buffer) == ROMFS_NOERR)) 
+    {
         int ret;
         int pos = 0;
+        bool fromMem = true;
 
-        int picture_data_length = file.entry.size;
-        uint8_t *picture_data = malloc(picture_data_length);
 
-        while (pos < picture_data_length && (ret = romfs_read_file(&picture_data[pos], 4096, &file)) > 0) {
-            pos += ret;
+        if (!picture_data)
+        {
+            fromMem = false;
+            picture_data_length = file.entry.size;
+            picture_data = malloc(picture_data_length);
+
+            while (pos < picture_data_length && (ret = romfs_read_file(&picture_data[pos], 4096, &file)) > 0) {
+                pos += ret;
+            }
+            romfs_close_file(&file);
+            syslog(LOG_INFO, "read image file %d bytes", pos);
         }
-        romfs_close_file(&file);
-        syslog(LOG_INFO, "read image file %d bytes", pos);
 
         if (picture_data != NULL && picture_data[0] == 0xff && picture_data[1] == 0xd8) {
             syslog(LOG_INFO, "User picture");
@@ -57,7 +64,8 @@ sprite_t *image_load(char *name, int screen_w, int screen_h)
 
             stbi_uc *stbi_img = stbi_load_from_memory(picture_data, picture_data_length, &w, &h, &channels, 4);
 
-            free(picture_data);
+            if (!fromMem)
+                free(picture_data);
 
             if (stbi_img) {
                 syslog(LOG_INFO, "image w = %d, h = %d, c = %d", w, h, channels);
@@ -102,7 +110,7 @@ void image_view(char *name, int screen_w, int screen_h, int screen_scale)
     while (true) {
         disp = display_get();
 
-        sprite_t *image = image_load(name, screen_w, screen_h);
+        sprite_t *image = image_load(name, screen_w, screen_h, NULL, 0);
 
         if (image) {
             graphics_draw_sprite(disp, 0, 0, image);
@@ -118,12 +126,7 @@ void image_view(char *name, int screen_w, int screen_h, int screen_scale)
         display_show(disp);
 
         while (1) {
-            joypad_poll();
-            joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
 
-            if (pressed.b) {
-                break;
-            }
         }
 
         if (image) {
